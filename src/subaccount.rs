@@ -18,6 +18,8 @@ use magical_bitcoin_wallet::Wallet;
 
 use crate::descriptor::get_descriptor;
 use crate::ga::*;
+use crate::twofactor::StdinResolver;
+use crate::types::TwoFactorConfigResponse;
 
 pub struct Subaccount {
     wallet: Wallet<Arc<ElectrumBlockchain>, Tree>,
@@ -31,6 +33,7 @@ impl Subaccount {
         db: &Db,
         client: &Arc<ElectrumBlockchain>,
         session: &Arc<GAClient>,
+        twofactor_config: TwoFactorConfigResponse,
     ) -> Result<Self, Box<dyn Error>> {
         let tree = db.open_tree(pointer.to_string())?;
 
@@ -47,6 +50,8 @@ impl Subaccount {
         let signer = Box::new(GASigner {
             session: Arc::clone(session),
             service_fingerprint,
+            resolver: Arc::new(StdinResolver),
+            twofactor_config,
         }) as Box<dyn Signer>;
         wallet.add_signer(
             ScriptType::External,

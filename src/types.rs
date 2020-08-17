@@ -1,4 +1,6 @@
-use serde::{de, Deserialize};
+use std::collections::HashMap;
+
+use serde::{de, Deserialize, Serialize};
 
 use bitcoin::hashes::hex::FromHex;
 use magical_bitcoin_wallet::bitcoin;
@@ -35,7 +37,7 @@ pub struct AuthenticateResponse {
     #[serde(deserialize_with = "deserialize_gait_path")]
     pub gait_path: Vec<u16>,
     pub earliest_key_creation_time: u64,
-    pub limits: Option<AuthenticateLimits>,
+    pub limits: AuthenticateLimits,
     pub subaccounts: Vec<AuthenticateSubaccount>,
 }
 
@@ -52,4 +54,46 @@ pub struct VaultFundResponse {
 pub struct SignTxResponse {
     pub new_limit: Option<AuthenticateLimits>,
     pub tx: String,
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TwoFactorMethod {
+    Email,
+    Gauth,
+    Phone,
+    Sms,
+}
+
+impl std::string::ToString for TwoFactorMethod {
+    fn to_string(&self) -> String {
+        format!("{:?}", self).to_lowercase()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TwoFactorConfigResponse {
+    #[serde(flatten)]
+    pub methods: HashMap<TwoFactorMethod, bool>,
+
+    pub any: bool,
+    pub email_addr: Option<String>,
+    pub email_confirmed: bool,
+    pub phone_number: Option<String>,
+}
+
+impl TwoFactorConfigResponse {
+    pub fn get_enabled(&self) -> Vec<TwoFactorMethod> {
+        self.methods
+            .iter()
+            .filter(|(_, v)| **v)
+            .map(|(k, _)| *k)
+            .collect()
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct TwoFactorData {
+    pub code: String,
+    pub method: TwoFactorMethod,
 }

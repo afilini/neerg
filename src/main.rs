@@ -20,7 +20,9 @@ use magical_bitcoin_wallet::blockchain::ElectrumBlockchain;
 mod descriptor;
 mod ga;
 mod subaccount;
+mod twofactor;
 mod types;
+mod wallet;
 
 use ga::GAClient;
 use subaccount::Subaccount;
@@ -45,6 +47,7 @@ async fn async_main() -> Result<(), Box<dyn Error>> {
     let xprv = ExtendedPrivKey::new_master(Network::Testnet, seed_bytes)?;
 
     let session = Arc::new(GAClient::new(&xprv).await?);
+    let twofactor_config = session.get_2fa_config().await?;
 
     let electrum_client = Arc::new(ElectrumBlockchain::from(
         ElectrumClient::new("ssl://electrum.blockstream.info:60002", None).unwrap(),
@@ -58,6 +61,7 @@ async fn async_main() -> Result<(), Box<dyn Error>> {
         &database,
         &electrum_client,
         &session,
+        twofactor_config.clone(),
     )?;
     subaccount.sync(None)?;
 
@@ -68,7 +72,7 @@ async fn async_main() -> Result<(), Box<dyn Error>> {
             .enable_rbf()
             .send_all(),
     )?;
-    // let (psbt, details) = subaccount.bump_fee(&Txid::from_str("dcc797d8af3fc267d198236fcdca17bf32323bf4f3e421a9c1b9992d76d319b8").unwrap(), TxBuilder::new().send_all().enable_rbf().fee_rate(FeeRate::from_sat_per_vb(2.5)))?;
+    // let (psbt, details) = subaccount.bump_fee(&Txid::from_str("0998044636fa8a4bf5c72136f18578b517b553755ebd0bf1fa94159dffca58e4").unwrap(), TxBuilder::new().send_all().enable_rbf().fee_rate(FeeRate::from_sat_per_vb(2.5)))?;
     let (psbt, finalized) = subaccount.sign(psbt, None)?;
     println!("finalized = {}", finalized);
 

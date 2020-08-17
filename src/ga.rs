@@ -19,6 +19,7 @@ use bitcoin::util::bip32::{ChildNumber, ExtendedPrivKey, Fingerprint};
 use bitcoin::util::psbt;
 use bitcoin::{Address, Network, Script, Transaction};
 
+use crate::twofactor::*;
 use crate::types::*;
 
 pub struct GAClient {
@@ -86,39 +87,65 @@ impl GAClient {
         })
     }
 
+    async fn call(&self, name: &str, args: Vec<Arg>) -> Result<serde_json::Value, Box<dyn Error>> {
+        let (response, _) = self.session.call(name, Some(args), None).await?;
+
+        Ok(serde_json::to_value(&response)?)
+    }
+
     pub async fn vault_fund(&self, subaccount: u16) -> Result<VaultFundResponse, Box<dyn Error>> {
-        let (response, _) = self
-            .session
+        let mut response = self
             .call(
                 "com.greenaddress.vault.fund",
-                Some(vec![
+                vec![
                     Arg::Integer(subaccount as usize),
                     Arg::Bool(true),
                     Arg::String("p2wsh".into()),
-                ]),
-                None,
+                ],
             )
             .await?;
-
-        let mut response = serde_json::to_value(&response)?;
         Ok(serde_json::from_value(response[0].take())?)
     }
 
-    pub async fn sign_raw_tx(&self, raw_tx: String) -> Result<SignTxResponse, Box<dyn Error>> {
-        let (response, _) = self
-            .session
+    pub async fn sign_raw_tx(
+        &self,
+        raw_tx: String,
+        twofactor_data: TwoFactorData,
+    ) -> Result<SignTxResponse, Box<dyn Error>> {
+        let twofactor_data = serde_json::to_value(&twofactor_data)?;
+        let twofactor_data = serde_json::from_value(twofactor_data)?;
+
+        let mut response = self
             .call(
                 "com.greenaddress.vault.sign_raw_tx",
-                Some(vec![
-                    Arg::String(raw_tx),
-                    // TODO: 2fa
-                ]),
-                None,
+                vec![Arg::String(raw_tx), twofactor_data],
             )
             .await?;
-
-        let mut response = serde_json::to_value(&response)?;
         Ok(serde_json::from_value(response[0].take())?)
+    }
+
+    pub async fn get_2fa_config(&self) -> Result<TwoFactorConfigResponse, Box<dyn Error>> {
+        let mut response = self
+            .call("com.greenaddress.twofactor.get_config", vec![])
+            .await?;
+        Ok(serde_json::from_value(response[0].take())?)
+    }
+
+    pub async fn request_2fa_code(
+        &self,
+        method: TwoFactorMethod,
+        action: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        if method == TwoFactorMethod::Gauth {
+            return Ok(());
+        }
+
+        self.call(
+            &format!("com.greenaddress.twofactor.request_{}", method.to_string()),
+            vec![Arg::String(action.into())],
+        )
+        .await?;
+        Ok(())
     }
 
     pub fn get_gait_path(&self) -> &Vec<u16> {
@@ -127,17 +154,30 @@ impl GAClient {
 }
 
 #[derive(Debug)]
-pub struct GASigner {
+pub struct GASigner<R: TwoFactorResolver + 'static> {
     pub session: Arc<GAClient>,
     pub service_fingerprint: Fingerprint,
+    pub resolver: Arc<R>,
+    pub twofactor_config: TwoFactorConfigResponse,
 }
 
-impl Signer for GASigner {
+impl<R: TwoFactorResolver> Signer for GASigner<R> {
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
         input_index: usize,
     ) -> Result<(), SignerError> {
+        if psbt.inputs[input_index].partial_sigs.contains_key(
+            &psbt.inputs[input_index]
+                .hd_keypaths
+                .iter()
+                .find(|(_, (fing, _))| fing == &self.service_fingerprint)
+                .map(|(pk, _)| pk.clone())
+                .unwrap(),
+        ) {
+            return Ok(());
+        }
+
         let mut tx = psbt.clone().extract_tx();
 
         for (i, p_i) in tx.input.iter_mut().zip(psbt.inputs.iter()) {
@@ -151,14 +191,29 @@ impl Signer for GASigner {
         }
 
         let session = Arc::clone(&self.session);
+        let resolver = Arc::clone(&self.resolver);
+        let twofactor_config = self.twofactor_config.clone();
         let (sender, receiver) = mpsc::channel();
 
         let handle = tokio::runtime::Handle::current();
         handle.spawn(async move {
-            let result = session
-                .sign_raw_tx(serialize_hex(&tx))
+            let method = resolver.get_method(twofactor_config.get_enabled());
+            session
+                .request_2fa_code(method, "send_raw_tx")
                 .await
-                .map_err(|_| SignerError::UserCanceled);
+                .unwrap();
+            let code = resolver.get_code();
+
+            let twofactor_data = TwoFactorData { code, method };
+
+            let result = session
+                .sign_raw_tx(serialize_hex(&tx), twofactor_data)
+                .await
+                .map_err(|e| {
+                    println!("{:?}", e);
+
+                    SignerError::UserCanceled
+                });
             sender.send(result).unwrap();
         });
 
@@ -166,15 +221,16 @@ impl Signer for GASigner {
         let signed_tx: Transaction =
             deserialize(&Vec::<u8>::from_hex(&signed_tx.tx).unwrap()).unwrap();
 
-        let service_pk = psbt.inputs[input_index]
-            .hd_keypaths
-            .iter()
-            .find(|(_, (fing, _))| fing == &self.service_fingerprint)
-            .map(|(pk, _)| pk.clone())
-            .unwrap();
-        psbt.inputs[input_index]
-            .partial_sigs
-            .insert(service_pk, signed_tx.input[input_index].witness[1].clone());
+        for p_i in &mut psbt.inputs {
+            let service_pk = p_i
+                .hd_keypaths
+                .iter()
+                .find(|(_, (fing, _))| fing == &self.service_fingerprint)
+                .map(|(pk, _)| pk.clone())
+                .unwrap();
+            p_i.partial_sigs
+                .insert(service_pk, signed_tx.input[input_index].witness[1].clone());
+        }
 
         Ok(())
     }
