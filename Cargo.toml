@@ -1,0 +1,27 @@
+[package]
+name = "neerg"
+version = "0.1.0"
+authors = ["Alekos Filini <alekos.filini@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+magical-bitcoin-wallet = { git = "https://github.com/afilini/magical-bitcoin-wallet.git", branch = "miniscript-pr-116" }
+bip0039 = "^0.6"
+env_logger = "0.7"
+lazy_static = "1.4"
+serde = { version = "^1.0", features = ["derive"] }
+serde_json = { version = "^1.0" }
+tokio = { version = "0.2", features = ["macros", "rt-threaded", "blocking"] }
+
+# FIXME: Waiting for https://github.com/elast0ny/wamp_async/pull/1
+wamp_async = { git = "https://github.com/afilini/wamp_async.git", branch = "fix/support-f64-numbers" }
+
+[patch.crates-io]
+bitcoin = { git = "https://github.com/rust-bitcoin/rust-bitcoin/", rev = "478e091" }
+miniscript = { git = "https://github.com/MagicalBitcoin/rust-miniscript", branch = "descriptor-public-key" }
+
+[profile.release]
+opt-level = 'z'
+lto = true
