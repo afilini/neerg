@@ -4,6 +4,10 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use bdk::bitcoin;
+use bdk::descriptor::{Descriptor, KeyMap, ToWalletDescriptor};
+use bdk::keys::KeyError;
+
+use bdk::miniscript::descriptor::DescriptorPublicKey;
 
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::secp256k1::Secp256k1;
@@ -41,60 +45,73 @@ lazy_static! {
     };
 }
 
-fn derive_ga_xpub(
-    gait_path: &Vec<u16>,
-    subaccount: Option<u16>,
-    ga_xpub: &ExtendedPubKey,
-) -> ExtendedPubKey {
-    let ctx = Secp256k1::new();
-
-    let full_path = match subaccount {
-        Some(subaccount) => {
-            let mut path = vec![3];
-            path.extend(gait_path);
-            path.push(subaccount);
-
-            path
-        }
-        None => {
-            let mut path = vec![1];
-            path.extend(gait_path);
-
-            path
-        }
-    };
-    let full_path: Vec<ChildNumber> = full_path
-        .into_iter()
-        .map(|index| ChildNumber::from_normal_idx(index.into()).unwrap())
-        .collect();
-
-    ga_xpub.derive_pub(&ctx, &full_path).unwrap()
+#[derive(Debug)]
+pub struct GreenSubaccountDescriptor<'a> {
+    pub xprv: &'a ExtendedPrivKey,
+    pub gait_path: &'a Vec<u16>,
+    pub subaccount: Option<u16>,
 }
 
-pub fn get_descriptor(
-    xprv: &ExtendedPrivKey,
-    gait_path: &Vec<u16>,
-    subaccount: Option<u16>,
-    network: Network,
-) -> (String, Fingerprint) {
-    let service = match network {
-        Network::Bitcoin => GA_MAINNET.deref(),
-        Network::Testnet => GA_TESTNET.deref(),
-        _ => unimplemented!(),
-    };
+impl<'a> GreenSubaccountDescriptor<'a> {
+    fn get_derived_service_xpub(&self, network: Network) -> ExtendedPubKey {
+        let ctx = Secp256k1::new();
 
-    let derived_service_xpub = derive_ga_xpub(gait_path, subaccount, service);
-    let service_fingerprint = derived_service_xpub.fingerprint();
+        let ga_xpub = match network {
+            Network::Bitcoin => GA_MAINNET.deref(),
+            Network::Testnet => GA_TESTNET.deref(),
+            _ => unimplemented!(),
+        };
 
-    let extra_path = match subaccount {
-        None => "".to_string(),
-        Some(pointer) => format!("3'/{}'/", pointer),
-    };
+        let full_path = match self.subaccount {
+            Some(subaccount) => {
+                let mut path = vec![3];
+                path.extend(self.gait_path);
+                path.push(subaccount);
 
-    let descriptor_str = format!(
-        "sh(wsh(multi(2,{}/*,{}/{}1/*)))",
-        derived_service_xpub, xprv, extra_path
-    );
+                path
+            }
+            None => {
+                let mut path = vec![1];
+                path.extend(self.gait_path);
 
-    (descriptor_str, service_fingerprint)
+                path
+            }
+        };
+        let full_path: Vec<ChildNumber> = full_path
+            .into_iter()
+            .map(|index| ChildNumber::from_normal_idx(index.into()).unwrap())
+            .collect();
+
+        ga_xpub.derive_pub(&ctx, &full_path).unwrap()
+    }
+
+    pub fn get_service_fingerprint(&self, network: Network) -> Fingerprint {
+        self.get_derived_service_xpub(network).fingerprint()
+    }
+}
+
+impl<'a> ToWalletDescriptor for GreenSubaccountDescriptor<'a> {
+    fn to_wallet_descriptor(
+        self,
+        network: Network,
+    ) -> Result<(Descriptor<DescriptorPublicKey>, KeyMap), KeyError> {
+        let derived_service_xpub = self.get_derived_service_xpub(network);
+
+        let mut path = match self.subaccount {
+            None => vec![],
+            Some(pointer) => vec![
+                ChildNumber::Hardened { index: 3 },
+                ChildNumber::Hardened {
+                    index: pointer as u32,
+                },
+            ],
+        };
+        path.push(ChildNumber::Normal { index: 1 });
+
+        let service_key = (derived_service_xpub, vec![].into());
+        let user_key = (self.xprv.clone(), path.into());
+
+        let descriptor = descriptor!(sh ( wsh ( multi 2, service_key, user_key ) ))?;
+        Ok((descriptor.0, descriptor.1))
+    }
 }

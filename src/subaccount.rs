@@ -15,7 +15,7 @@ use bdk::wallet::address_validator::AddressValidator;
 use bdk::wallet::signer::{Signer, SignerOrdering};
 use bdk::{ScriptType, Wallet};
 
-use crate::descriptor::get_descriptor;
+use crate::descriptor::GreenSubaccountDescriptor;
 use crate::ga::*;
 use crate::twofactor::StdinResolver;
 use crate::types::TwoFactorConfigResponse;
@@ -41,10 +41,17 @@ impl Subaccount {
             p => Some(p),
         };
 
-        let (desc, service_fingerprint) =
-            get_descriptor(xprv, gait_path, pointer, Network::Testnet);
+        let desc = GreenSubaccountDescriptor {
+            xprv,
+            gait_path,
+            subaccount: pointer,
+        };
+        let service_fingerprint = desc.get_service_fingerprint(Network::Testnet);
 
-        let mut wallet = Wallet::new(&desc, None, Network::Testnet, tree, Arc::clone(&client))?;
+        // let (desc, service_fingerprint) =
+        //     get_descriptor(xprv, gait_path, pointer, Network::Testnet);
+
+        let mut wallet = Wallet::new(desc, None, Network::Testnet, tree, Arc::clone(&client))?;
 
         let signer = Box::new(GASigner {
             session: Arc::clone(session),

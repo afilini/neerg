@@ -1,6 +1,9 @@
 #[macro_use]
 extern crate lazy_static;
 
+#[macro_use]
+extern crate bdk;
+
 use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
