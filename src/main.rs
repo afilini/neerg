@@ -7,15 +7,15 @@ use std::sync::Arc;
 
 use bip0039::{Language, Mnemonic, Seed};
 
-use magical_bitcoin_wallet::bitcoin;
-use magical_bitcoin_wallet::electrum_client::Client as ElectrumClient;
-use magical_bitcoin_wallet::sled;
-use magical_bitcoin_wallet::{FeeRate, TxBuilder};
+use bdk::bitcoin;
+use bdk::electrum_client::Client as ElectrumClient;
+use bdk::sled;
+use bdk::{FeeRate, TxBuilder};
 
 use bitcoin::util::bip32::ExtendedPrivKey;
 use bitcoin::{Network, Txid};
 
-use magical_bitcoin_wallet::blockchain::ElectrumBlockchain;
+use bdk::blockchain::{noop_progress, ElectrumBlockchain};
 
 mod descriptor;
 mod ga;
@@ -63,12 +63,12 @@ async fn async_main() -> Result<(), Box<dyn Error>> {
         &session,
         twofactor_config.clone(),
     )?;
-    subaccount.sync(None)?;
+    subaccount.sync(noop_progress(), None)?;
 
     println!("balance: {}", subaccount.get_balance()?);
 
     let (psbt, details) = subaccount.create_tx(
-        TxBuilder::from_addressees(vec![(subaccount.get_new_address()?, 0)])
+        TxBuilder::with_recipients(vec![(subaccount.get_new_address()?.script_pubkey(), 0)])
             .enable_rbf()
             .send_all(),
     )?;

@@ -3,7 +3,7 @@
 use std::ops::Deref;
 use std::str::FromStr;
 
-use magical_bitcoin_wallet::bitcoin;
+use bdk::bitcoin;
 
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::secp256k1::Secp256k1;

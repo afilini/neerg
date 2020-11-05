@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use serde::{de, Deserialize, Serialize};
 
+use bdk::bitcoin;
+
 use bitcoin::hashes::hex::FromHex;
-use magical_bitcoin_wallet::bitcoin;
 
 fn deserialize_gait_path<'de, D>(deserializer: D) -> Result<Vec<u16>, D::Error>
 where

@@ -4,11 +4,11 @@ use std::sync::{mpsc, Arc};
 
 use wamp_async::{Arg, Client};
 
-use magical_bitcoin_wallet::bitcoin;
-use magical_bitcoin_wallet::descriptor::HDKeyPaths;
-use magical_bitcoin_wallet::types::ScriptType;
-use magical_bitcoin_wallet::wallet::address_validator::{AddressValidator, AddressValidatorError};
-use magical_bitcoin_wallet::wallet::signer::{Signer, SignerError};
+use bdk::bitcoin;
+use bdk::descriptor::HDKeyPaths;
+use bdk::wallet::address_validator::{AddressValidator, AddressValidatorError};
+use bdk::wallet::signer::{Signer, SignerError};
+use bdk::ScriptType;
 
 use bitcoin::blockdata::script::Builder;
 use bitcoin::consensus::encode::{deserialize, serialize_hex};
@@ -162,22 +162,15 @@ pub struct GASigner<R: TwoFactorResolver + 'static> {
 }
 
 impl<R: TwoFactorResolver> Signer for GASigner<R> {
+    fn sign_whole_tx(&self) -> bool {
+        true
+    }
+
     fn sign(
         &self,
         psbt: &mut psbt::PartiallySignedTransaction,
-        input_index: usize,
+        input_index: Option<usize>,
     ) -> Result<(), SignerError> {
-        if psbt.inputs[input_index].partial_sigs.contains_key(
-            &psbt.inputs[input_index]
-                .hd_keypaths
-                .iter()
-                .find(|(_, (fing, _))| fing == &self.service_fingerprint)
-                .map(|(pk, _)| pk.clone())
-                .unwrap(),
-        ) {
-            return Ok(());
-        }
-
         let mut tx = psbt.clone().extract_tx();
 
         for (i, p_i) in tx.input.iter_mut().zip(psbt.inputs.iter()) {
@@ -221,15 +214,16 @@ impl<R: TwoFactorResolver> Signer for GASigner<R> {
         let signed_tx: Transaction =
             deserialize(&Vec::<u8>::from_hex(&signed_tx.tx).unwrap()).unwrap();
 
-        for p_i in &mut psbt.inputs {
-            let service_pk = p_i
+        for (psbt_input, signed_input) in psbt.inputs.iter_mut().zip(signed_tx.input.iter()) {
+            let service_pk = psbt_input
                 .hd_keypaths
                 .iter()
                 .find(|(_, (fing, _))| fing == &self.service_fingerprint)
                 .map(|(pk, _)| pk.clone())
                 .unwrap();
-            p_i.partial_sigs
-                .insert(service_pk, signed_tx.input[input_index].witness[1].clone());
+            psbt_input
+                .partial_sigs
+                .insert(service_pk, signed_input.witness[1].clone());
         }
 
         Ok(())

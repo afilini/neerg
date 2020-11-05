@@ -2,19 +2,18 @@ use std::error::Error;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use magical_bitcoin_wallet::bitcoin;
-use magical_bitcoin_wallet::sled;
+use bdk::bitcoin;
+use bdk::sled;
 
 use bitcoin::util::bip32::ExtendedPrivKey;
 use bitcoin::Network;
 
 use sled::{Db, Tree};
 
-use magical_bitcoin_wallet::blockchain::ElectrumBlockchain;
-use magical_bitcoin_wallet::types::ScriptType;
-use magical_bitcoin_wallet::wallet::address_validator::AddressValidator;
-use magical_bitcoin_wallet::wallet::signer::{Signer, SignerOrdering};
-use magical_bitcoin_wallet::Wallet;
+use bdk::blockchain::ElectrumBlockchain;
+use bdk::wallet::address_validator::AddressValidator;
+use bdk::wallet::signer::{Signer, SignerOrdering};
+use bdk::{ScriptType, Wallet};
 
 use crate::descriptor::get_descriptor;
 use crate::ga::*;
